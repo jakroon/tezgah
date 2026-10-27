@@ -878,6 +878,7 @@ body.has-modal #toasts { top: 18px; bottom: auto; flex-direction: column-reverse
 .doc-focus strong { display: block; font-size: 20px; margin-top: 1px; }
 .doc-focus-sub { margin: 0 0 4px; font-size: 11px; color: #333; }
 .doc tr.hl td { font-weight: 700; }
+.doc tr.sum td { font-weight: 700; border-top: 1.5px solid #111; }
 .doc .grouped tr.grp-h td { font-weight: 700; border-bottom: 1px solid #111; padding-top: 10px; }
 .doc tr { break-inside: avoid; }
 
@@ -950,7 +951,7 @@ body.has-modal #toasts { top: 18px; bottom: auto; flex-direction: column-reverse
 /* ============================================================
    Yardımcılar: biçimlendirme, ikonlar, bildirim, pencere, menü
    ============================================================ */
-const APP = { name: 'Tezgâh', version: '1.1.0', dev: 'VETTA' };
+const APP = { name: 'Tezgâh', version: '1.1.1', dev: 'VETTA' };
 /* Tanıtım için hazırlanan örnek dosya: kayıt tutmaz, gerçek kayıtlara ve yedeklere dokunmaz */
 const SAMPLE = window.TEZGAH_ORNEK === true;
 
@@ -1219,8 +1220,12 @@ function openModal(o) {
       setTimeout(() => wrap.remove(), 160);
       try { o.onClose && o.onClose(res); } catch (e) { console.error(e); }
       if (!MODALS.length) {
-        if (current && current.page && current.page.focus) setTimeout(() => current.page.focus(), 30);
-        else if (prevFocus && prevFocus.focus && document.contains(prevFocus)) prevFocus.focus();
+        // Pencere kapanır kapanmaz başka sayfaya geçilmiş olabilir: odağı o anki sayfaya göre ver
+        setTimeout(() => {
+          if (MODALS.length) return;
+          if (current && current.page && typeof current.page.focus === 'function') current.page.focus();
+          else if (prevFocus && prevFocus.focus && document.contains(prevFocus)) prevFocus.focus();
+        }, 30);
       }
     },
     onKey: o.onKey
@@ -2126,6 +2131,8 @@ function itemsSummary(items, max = 80) {
 }
 /* Satışın ödeme parçaları: { nakit, kart, veresiye } (parçalı ödemede birden fazla) */
 function salePays(s) { return s.pays ? s.pays : { [s.pay]: s.total }; }
+/* Ciro: peşin satış, yani nakit + kart. Veresiye satış ciroya girmez, ayrı tutulur. */
+function ciroOf(d) { return d ? r2((d.t || 0) - ((d.pay && d.pay.veresiye) || 0)) : 0; }
 function saleCredit(s) { const p = salePays(s); return p.veresiye || 0; }
 function emptyDay(id) { return { id, n: 0, t: 0, c: 0, disc: 0, pay: { nakit: 0, kart: 0, veresiye: 0 }, h: Array(24).fill(0), p: {}, st: [0, 0, 0] }; }
 /* Günlük toplamlar. d.p[ürün] = [miktar, tutar, maliyet, ad, kategori, birim, marka]
@@ -2591,6 +2598,7 @@ function aggregate(from, to) {
   A.st = [A.st[0], r2(A.st[1]), r2(A.st[2])];
   A.t = r2(A.t); A.c = r2(A.c); A.profit = r2(A.t - A.c);
   for (const k2 of Object.keys(A.pay)) A.pay[k2] = r2(A.pay[k2]);
+  A.ciro = r2(A.t - A.pay.veresiye);
   const inR = (ts) => { const k = dayKey(ts); return k >= from && k <= to; };
   const exps = S.expenses.filter((x) => inR(x.ts));
   A.exp = r2(sum(exps, (x) => x.amt));
@@ -3973,10 +3981,10 @@ async function salesHistoryModal(dk = todayKey()) {
     $('#sh-day', el).textContent = fmtDay(day) + (day === todayKey() ? ' (bugün)' : '');
     $('#sh-next', el).disabled = day >= todayKey();
     $('#sh-stats', el).innerHTML = `
-      <div class="stat"><div class="k">Toplam</div><div class="v">${money(tot())}</div><div class="d">${plural(live.length, 'satış')}</div></div>
+      <div class="stat"><div class="k">Ciro</div><div class="v">${money(r2(tot('nakit') + tot('kart')))}</div><div class="d">${plural(live.length, 'satış')}, nakit + kart</div></div>
       <div class="stat"><div class="k"><i class="dot nakit"></i>Nakit</div><div class="v">${money(tot('nakit'))}</div></div>
       <div class="stat"><div class="k"><i class="dot kart"></i>Kart</div><div class="v">${money(tot('kart'))}</div></div>
-      <div class="stat"><div class="k"><i class="dot veresiye"></i>Veresiye</div><div class="v">${money(tot('veresiye'))}</div></div>`;
+      <div class="stat"><div class="k"><i class="dot veresiye"></i>Veresiye</div><div class="v">${money(tot('veresiye'))}</div><div class="d">ciroya dahil değil</div></div>`;
     $('#sh-f', el).innerHTML = [['all', 'Tümü'], ['nakit', 'Nakit'], ['kart', 'Kart'], ['veresiye', 'Veresiye'], ['staff', 'Personel'], ['void', 'İptal edilen']].map(([k, l]) => `<button class="chip ${filter === k ? 'on' : ''}" data-f="${k}">${l}</button>`).join('');
     $('#sh-list', el).innerHTML = shown.length ? `<table class="tbl"><thead><tr><th class="w1">Saat</th><th class="w1">No</th><th>Ürünler</th><th>Ödeme</th><th class="r">Tutar</th></tr></thead><tbody>
       ${shown.map((s) => {
@@ -4422,7 +4430,7 @@ function productHistoryModal(p) {
     body: `<div class="stats">
         <div class="stat"><div class="k">Stok</div><div class="v">${p.track === false ? '—' : qtyFmt(p.stock) + ' ' + esc(p.unit)}</div></div>
         <div class="stat"><div class="k">Son 30 gün satış</div><div class="v">${qtyFmt(q)} ${esc(p.unit)}</div></div>
-        <div class="stat"><div class="k">Son 30 gün ciro</div><div class="v">${money(t)}</div></div>
+        <div class="stat"><div class="k">Son 30 gün satış</div><div class="v">${money(t)}</div></div>
         <div class="stat"><div class="k">Son 30 gün kâr</div><div class="v">${money(t - c)}</div></div></div>
       ${p.skt ? `<h3 class="mt" style="font-size:15px;margin-bottom:8px">Son kullanma tarihleri</h3>
         <div class="panel flush">${lots.length ? `<table class="tbl"><thead><tr><th>SKT</th><th>Durum</th><th class="r">Kalan</th><th class="w1"></th></tr></thead><tbody>
@@ -5660,7 +5668,7 @@ function unitsBig(f) {
   return parts.map(([u, q]) => `<b>${qtyFmt(q)}</b><small>${esc(u)}</small>`).join('<i>+</i>');
 }
 
-/* Öne çıkan kategori bandı: "Sigara · 37 paket · 3.700 ₺ · cironun %42'si" */
+/* Öne çıkan kategori bandı: "Sigara · 37 paket · 3.700 ₺ · satışların %42'si" (veresiye dahil) */
 function focusBand(A, { sub = 'Bugün satılan', cmp = '' } = {}) {
   const f = focusSummary(A);
   if (!f) return '';
@@ -5671,7 +5679,7 @@ function focusBand(A, { sub = 'Bugün satılan', cmp = '' } = {}) {
     <div class="fb-k"><span class="fb-ic">${ic('target')}</span><div><b>${esc(f.cat)}</b><small>${esc(sub)}</small></div></div>
     <div class="fb-q"><div class="fb-n">${unitsBig(f)}</div>${cmp ? `<div class="fb-cmp">${esc(cmp)}</div>` : ''}</div>
     <div class="fb-t"><span>Tutar</span><b>${money(f.t)}</b></div>
-    <div class="fb-t"><span>Cirodaki payı</span><b>${pct(share)}</b></div>
+    <div class="fb-t"><span>Satıştaki payı</span><b>${pct(share)}</b></div>
     <div class="fb-b">${shown.length
       ? shown.map((x) => `<span title="${esc(x.name)}: ${esc(unitsText(x.units))}, ${esc(money(x.t))}">${esc(x.name)}<em>${esc(unitsText(x.units))}</em></span>`).join('') + (parts.length > shown.length ? `<span class="more">+${parts.length - shown.length}</span>` : '')
       : '<span class="none">Henüz satış yok</span>'}</div>
@@ -5714,7 +5722,7 @@ function breakdownPanel(A, id, { title = 'Satış dökümü', sub = '', profit =
   return `<div class="panel flush bd" data-bd="${id}">${head}
     <div class="tbl-wrap"><table class="tbl bd-tbl"><thead><tr><th>${by === 'brand' ? 'Marka' : 'Kategori'}</th><th class="r">Miktar</th><th class="r">Tutar</th>${profit ? '<th class="r">Kâr</th>' : ''}<th class="r share-h">Pay</th></tr></thead>
     <tbody>${body}</tbody>
-    <tfoot><tr><td>Toplam</td><td></td><td class="r">${money(tot)}</td>${profit ? `<td class="r">${money(tot - totC)}</td>` : ''}<td class="r">${tot > 0 ? '%100' : ''}</td></tr></tfoot></table></div></div>`;
+    <tfoot><tr><td>Toplam satış <span class="muted" style="font-weight:500">(veresiye dahil)</span></td><td></td><td class="r">${money(tot)}</td>${profit ? `<td class="r">${money(tot - totC)}</td>` : ''}<td class="r">${tot > 0 ? '%100' : ''}</td></tr></tfoot></table></div></div>`;
 }
 function mountBreakdown(host, A, id, opts = {}) {
   if (!host) return;
@@ -5761,7 +5769,7 @@ function docFocusBox(A, label) {
   return `<div class="doc-focus">
       <div><small>${esc(f.cat)}, ${esc(label)}</small><strong>${esc(focusQtyText(f))}</strong></div>
       <div><small>Tutar</small><strong>${money(f.t)}</strong></div>
-      <div><small>Cirodaki payı</small><strong>${pct(share)}</strong></div>
+      <div><small>Satıştaki payı</small><strong>${pct(share)}</strong></div>
     </div>
     ${parts.length ? `<p class="doc-focus-sub">${parts.slice(0, 10).map((x) => `${esc(x.name)} <b>${esc(unitsText(x.units))}</b>`).join(' · ')}${parts.length > 10 ? ` · +${parts.length - 10}` : ''}</p>` : ''}`;
 }
@@ -5773,7 +5781,7 @@ function docGroupTable(A, by = 'cat', { title = '', profit = true } = {}) {
   return `<h3>${esc(title || (by === 'brand' ? 'Markalara göre satış' : 'Kategorilere göre satış'))}</h3>
     <table><thead><tr><th>${by === 'brand' ? 'Marka' : 'Kategori'}</th><th class="r">Miktar</th><th class="r">Tutar</th>${profit ? '<th class="r">Brüt kâr</th>' : ''}<th class="r">Pay</th></tr></thead><tbody>
     ${groups.map((g) => `<tr${by === 'cat' && g.key === fc ? ' class="hl"' : ''}><td>${esc(by === 'brand' ? brandLabel(g.key) : g.key)}</td><td class="r">${esc(unitsText(g.units))}</td><td class="r">${money(g.t)}</td>${profit ? `<td class="r">${money(g.t - g.c)}</td>` : ''}<td class="r">${tot > 0 ? pct(g.t / tot) : ''}</td></tr>`).join('')}
-    </tbody><tfoot><tr><td>Toplam</td><td></td><td class="r">${money(tot)}</td>${profit ? `<td class="r">${money(tot - totC)}</td>` : ''}<td class="r">${tot > 0 ? '%100' : ''}</td></tr></tfoot></table>`;
+    </tbody><tfoot><tr><td>Toplam satış (veresiye dahil)</td><td></td><td class="r">${money(tot)}</td>${profit ? `<td class="r">${money(tot - totC)}</td>` : ''}<td class="r">${tot > 0 ? '%100' : ''}</td></tr></tfoot></table>`;
 }
 /* Bütün ürünler, kategori başlıkları altında (öne çıkan kategori en üstte) */
 function docGroupedItems(A, { title = 'Ürün ürün satışlar' } = {}) {
@@ -5834,14 +5842,15 @@ PAGES.kasa = {
         <div class="panel">
           <div class="panel-head"><h3>Günün özeti</h3></div>
           <div class="panel-body"><div class="flow">
-            ${row('Toplam ciro', money(d.t), 'strong')}
-            ${row('Satış sayısı', NF0.format(d.n))}
+            ${row('Ciro <span class="muted">(nakit + kart)</span>', money(ciroOf(d)), 'strong')}
+            ${row('Nakit satış', money(d.pay.nakit || 0), '', '<i class="dot nakit"></i>')}
             ${row('Kartla satış', money(d.pay.kart || 0), '', '<i class="dot kart"></i>')}
-            ${row('Veresiye satış', money(d.pay.veresiye || 0), '', '<i class="dot veresiye"></i>')}
+            ${row('Veresiye satış <span class="muted">(ciroya dahil değil)</span>', money(d.pay.veresiye || 0), '', '<i class="dot veresiye"></i>')}
+            ${row('Satış sayısı', NF0.format(d.n))}
             ${stf[0] ? row(`Personel satışları <span class="muted">(${NF0.format(stf[0])})</span>`, money(stf[1]), '', '<i class="dot staff"></i>') : ''}
             ${stf[2] > 0.004 ? row('Personele yapılan indirim', money(stf[2]), 'muted') : ''}
-            ${row('Kart / havale ile tahsilat', money(cs.colOther))}
-            ${row('Brüt kâr', money(d.t - d.c), d.t - d.c >= 0 ? 'green' : 'red')}
+            ${row('Veresiye tahsilatı <span class="muted">(kart / havale)</span>', money(cs.colOther))}
+            ${row('Brüt kâr <span class="muted">(veresiye dahil)</span>', money(d.t - d.c), d.t - d.c >= 0 ? 'green' : 'red')}
           </div></div>
         </div>
       </div>
@@ -5855,11 +5864,11 @@ PAGES.kasa = {
         <div class="panel">
           <div class="panel-head"><h3>Gün sonu geçmişi</h3></div>
           ${closings.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Gün</th><th class="r">Ciro</th>${fc ? `<th class="r">${esc(fc)}</th>` : ''}<th class="r">Sayılan</th><th class="r">Fark</th></tr></thead><tbody>
-            ${closings.map((c) => `<tr class="click${c.id === dk ? ' sel' : ''}" data-day="${c.id}" title="Beklenen ${money(c.expected)}"><td>${fmtDate(fromKey(c.id))}</td><td class="r">${money(c.sales || 0)}</td>${fc ? `<td class="r">${esc(focusQtyText({ cat: fc, units: dayFocus(S.days.get(c.id), fc).units }))}</td>` : ''}<td class="r">${money(c.counted)}</td><td class="r ${Math.abs(c.diff) < 0.01 ? 'muted' : c.diff < 0 ? 'red' : 'amber'}">${Math.abs(c.diff) < 0.01 ? 'tam' : signed(c.diff)}</td></tr>`).join('')}
+            ${closings.map((c) => `<tr class="click${c.id === dk ? ' sel' : ''}" data-day="${c.id}" title="Beklenen ${money(c.expected)}"><td>${fmtDate(fromKey(c.id))}</td><td class="r">${money(S.days.has(c.id) ? ciroOf(S.days.get(c.id)) : r2((c.cashSales || 0) + (c.cardSales || 0)))}</td>${fc ? `<td class="r">${esc(focusQtyText({ cat: fc, units: dayFocus(S.days.get(c.id), fc).units }))}</td>` : ''}<td class="r">${money(c.counted)}</td><td class="r ${Math.abs(c.diff) < 0.01 ? 'muted' : c.diff < 0 ? 'red' : 'amber'}">${Math.abs(c.diff) < 0.01 ? 'tam' : signed(c.diff)}</td></tr>`).join('')}
           </tbody></table></div>` : `<div class="empty" style="padding:26px">${ic('cash')}<p>Henüz gün sonu alınmadı. Akşam kasayı sayıp "Gün sonu al" ile kaydedin; eksik ya da fazla burada görünür.</p></div>`}
         </div>
       </div></div>`;
-    mountBreakdown($('#ks-bd', el), A, 'kasa', { title: 'Günün satış dökümü', sub: 'Hangi kategoriden, hangi üründen ne kadar satıldı', empty: isToday ? 'Bugün henüz satış yapılmadı.' : 'Bu gün satış yapılmamış.' });
+    mountBreakdown($('#ks-bd', el), A, 'kasa', { title: 'Günün satış dökümü', sub: 'Hangi kategoriden, hangi üründen ne kadar satıldı (veresiye dahil)', empty: isToday ? 'Bugün henüz satış yapılmadı.' : 'Bu gün satış yapılmamış.' });
     el.addEventListener('click', async (e) => {
       const dd = e.target.closest('[data-day]'); if (dd) { KS.day = dd.dataset.day; rerender(); return; }
       const dx = e.target.closest('[data-delexp]');
@@ -5953,7 +5962,7 @@ function printDayReport(dk) {
   printHTML(`<div class="doc">${docHeader('GÜN SONU RAPORU', fmtDay(dk))}
     ${docFocusBox(A, dk === todayKey() ? 'bugün satılan' : 'o gün satılan')}
     <div class="doc-grid">
-      <div><h3>Satışlar</h3><table><tbody>${tr('Satış sayısı', NF0.format(d.n))}${tr('Nakit', money(d.pay.nakit))}${tr('Kart', money(d.pay.kart))}${tr('Veresiye', money(d.pay.veresiye))}${d.disc ? tr('Sepette yapılan indirim', money(d.disc)) : ''}${st[0] ? tr(`Personel satışları (${NF0.format(st[0])})`, money(st[1])) : ''}${st[2] > 0.004 ? tr('Personele yapılan indirim', money(st[2])) : ''}</tbody><tfoot><tr><td>Toplam ciro</td><td class="r">${money(d.t)}</td></tr><tr><td>Brüt kâr</td><td class="r">${money(d.t - d.c)}</td></tr></tfoot></table></div>
+      <div><h3>Satışlar</h3><table><tbody>${tr('Satış sayısı', NF0.format(d.n))}${tr('Nakit satış', money(d.pay.nakit))}${tr('Kartla satış', money(d.pay.kart))}<tr class="sum"><td>Ciro (nakit + kart)</td><td class="r">${money(ciroOf(d))}</td></tr>${tr('Veresiye satış (ciroya dahil değil)', money(d.pay.veresiye))}${tr('Veresiye tahsilatı', money(r2(cs.colCash + cs.colOther)))}${d.disc ? tr('Sepette yapılan indirim', money(d.disc)) : ''}${st[0] ? tr(`Personel satışları (${NF0.format(st[0])})`, money(st[1])) : ''}${st[2] > 0.004 ? tr('Personele yapılan indirim', money(st[2])) : ''}</tbody><tfoot><tr><td>Brüt kâr (veresiye dahil)</td><td class="r">${money(d.t - d.c)}</td></tr></tfoot></table></div>
       <div><h3>Kasa</h3><table><tbody>${tr('Gün başı nakit', money(cs.opening))}${tr('Nakit satışlar', plusM(cs.cashSales))}${tr('Nakit tahsilat', plusM(cs.colCash))}${tr('Nakit giderler', minusM(cs.expCash))}${tr('Toptancıya nakit ödeme', minusM(cs.supCash))}${cs.purCash ? tr('Peşin mal alımı', minusM(cs.purCash)) : ''}</tbody><tfoot><tr><td>Olması gereken</td><td class="r">${money(cs.expected)}</td></tr>${cl ? `<tr><td>Sayılan</td><td class="r">${money(cl.counted)}</td></tr><tr><td>Fark</td><td class="r">${signed(cl.diff)}</td></tr><tr><td>Ertesi güne bırakılan</td><td class="r">${money(cl.carry)}</td></tr>` : ''}</tfoot></table></div>
     </div>
     ${docGroupTable(A, 'cat')}
@@ -5964,7 +5973,7 @@ function printDayReport(dk) {
 
 /* ---- 80-reports.js ---- */
 /* ============================================================
-   Raporlar: ciro, kâr, giderler, fire, ödeme türleri, saatler, ürünler
+   Raporlar: ciro (nakit + kart), veresiye, kâr, giderler, fire, ödeme türleri, saatler, ürünler
    ============================================================ */
 const RS = { preset: 'month', from: '', to: '', prodSort: 't', showDays: false };
 const PRESETS = [['today', 'Bugün'], ['yesterday', 'Dün'], ['week', 'Bu hafta'], ['month', 'Bu ay'], ['prev', 'Geçen ay'], ['30', 'Son 30 gün'], ['year', 'Bu yıl'], ['custom', 'Tarih seç']];
@@ -6043,20 +6052,20 @@ PAGES.raporlar = {
         ${RS.preset === 'custom' ? `<div style="display:flex;gap:8px;align-items:center"><input class="inp" type="date" id="rp-f" value="${from}" max="${todayKey()}" style="width:auto"><span class="muted">–</span><input class="inp" type="date" id="rp-t" value="${to}" max="${todayKey()}" style="width:auto"></div>` : ''}</div>
       ${focusBand(A, { sub: presetWhen(), cmp: pf ? `Önceki dönem ${focusQtyText(pf)}` : '' })}
       <div class="stats c4${fc ? ' mt' : ''}">
-        <div class="stat"><div class="k">Ciro</div><div class="v">${money(A.t)}</div><div class="d">${deltaHtml(A.t, P.t, { label: 'önceki döneme göre' })}</div></div>
-        <div class="stat"><div class="k">Brüt kâr</div><div class="v">${money(A.profit)}</div><div class="d">Marj ${pct(margin2, 1)}</div></div>
+        <div class="stat"><div class="k">Ciro <span style="font-weight:500">(nakit + kart)</span></div><div class="v">${money(A.ciro)}</div><div class="d">${deltaHtml(A.ciro, P.ciro, { label: 'önceki döneme göre' })}</div></div>
+        <div class="stat"><div class="k">Brüt kâr</div><div class="v">${money(A.profit)}</div><div class="d">Marj ${pct(margin2, 1)}, veresiye dahil</div></div>
         <div class="stat"><div class="k">Giderler</div><div class="v">${money(A.exp)}</div><div class="d">${Object.keys(A.expByCat).length ? plural(Object.keys(A.expByCat).length, 'kalem') : 'Kayıt yok'}</div></div>
         <div class="stat"><div class="k">Fire</div><div class="v">${money(A.waste)}</div><div class="d">${A.wastes.length ? plural(A.wastes.length, 'kayıt') : 'Kayıt yok'}</div></div>
         <div class="stat hero"><div class="k">Net kâr</div><div class="v ${A.net < 0 ? 'red' : ''}">${money(A.net)}</div><div class="d">${deltaHtml(A.net, P.net, { label: 'önceki döneme göre' })}</div></div>
         <div class="stat"><div class="k">Satış / ortalama sepet</div><div class="v">${NF0.format(A.n)}</div><div class="d">Sepet ${money(avg)} ${P.n ? deltaHtml(avg, pAvg) : ''}</div></div>
         <div class="stat"><div class="k"><i class="dot staff"></i>Personel satışları</div><div class="v">${money(st[1])}</div><div class="d">${st[0] ? `${plural(st[0], 'satış')}, indirim ${money(st[2])}` : 'Bu dönemde yok'}</div></div>
-        <div class="stat"><div class="k"><i class="dot veresiye"></i>Veresiye</div><div class="v">${money(A.pay.veresiye)}</div><div class="d">Tahsil edilen ${money(A.collected)}</div></div>
+        <div class="stat"><div class="k"><i class="dot veresiye"></i>Veresiye satış</div><div class="v">${money(A.pay.veresiye)}</div><div class="d">Ciroya dahil değil, tahsil edilen ${money(A.collected)}</div></div>
       </div>
       ${A.noCost ? `<div class="note warn mt">${ic('alert', 'sm')} Bu dönemde satılan <b>${plural(A.noCost, 'üründe')}</b> alış fiyatı girilmemiş; kâr olduğundan yüksek görünür. Ürünler ekranında "Alış" sütununu tamamlayın.</div>` : ''}
       <div class="mt" id="rp-bd"></div>
       <div class="panel mt">
-        <div class="panel-head"><h3>${monthly ? 'Ay ay' : 'Gün gün'} ciro ve kâr</h3><span class="sub">Çubuğun tamamı ciro, mavi kısmı brüt kâr</span>
-          <div class="end legend"><span><i style="background:var(--c-kar)"></i>Brüt kâr</span><span><i style="background:var(--c-maliyet)"></i>Maliyet</span></div></div>
+        <div class="panel-head"><h3>${monthly ? 'Ay ay' : 'Gün gün'} ciro ve veresiye</h3><span class="sub">Mavi kısım ciro (nakit + kart), turuncu kısım veresiye satış</span>
+          <div class="end legend"><span><i style="background:var(--c-kar)"></i>Ciro</span><span><i style="background:var(--c-veresiye)"></i>Veresiye</span></div></div>
         <div class="panel-body"><div id="rp-ch"></div></div>
       </div>
       <div class="grid g-2 mt" style="align-items:start">
@@ -6065,8 +6074,8 @@ PAGES.raporlar = {
         <div class="panel"><div class="panel-head"><h3>Saatlere göre satış</h3><span class="sub">${A.t ? `En yoğun saat ${pad(peak)}:00–${pad((peak + 1) % 24)}:00` : ''}</span></div><div class="panel-body"><div id="rp-hr"></div></div></div>
       </div>
       <div class="panel flush mt">
-        <div class="panel-head"><h3>Ürünler</h3><span class="sub">${plural(prods.length, 'ürün')} satıldı${prods.length > 100 ? ', ilk 100 gösteriliyor' : ''}</span><div class="end"><div class="seg" id="rp-ps">${[['t', 'Ciro'], ['p', 'Kâr'], ['q', 'Miktar']].map(([k, l]) => `<button data-ps="${k}" class="${RS.prodSort === k ? 'on' : ''}">${l}</button>`).join('')}</div></div></div>
-        ${prods.length ? `<div class="tbl-wrap" style="max-height:560px"><table class="tbl"><thead><tr><th class="w1">#</th><th>Ürün</th><th>Marka / kategori</th><th class="r">Miktar</th><th class="r">Ciro</th><th class="r">Kâr</th><th style="width:16%"></th></tr></thead><tbody>
+        <div class="panel-head"><h3>Ürünler</h3><span class="sub">${plural(prods.length, 'ürün')} satıldı${prods.length > 100 ? ', ilk 100 gösteriliyor' : ''}</span><div class="end"><div class="seg" id="rp-ps">${[['t', 'Tutar'], ['p', 'Kâr'], ['q', 'Miktar']].map(([k, l]) => `<button data-ps="${k}" class="${RS.prodSort === k ? 'on' : ''}">${l}</button>`).join('')}</div></div></div>
+        ${prods.length ? `<div class="tbl-wrap" style="max-height:560px"><table class="tbl"><thead><tr><th class="w1">#</th><th>Ürün</th><th>Marka / kategori</th><th class="r">Miktar</th><th class="r">Tutar</th><th class="r">Kâr</th><th style="width:16%"></th></tr></thead><tbody>
           ${(() => { const val = (x) => RS.prodSort === 'q' ? x.q : RS.prodSort === 'p' ? Math.max(0, x.profit) : x.t; const mx = Math.max(1e-9, ...prods.map(val)); return prods.slice(0, 100).map((x, i) => `<tr><td class="w1 muted tnum">${i + 1}</td><td><span class="nm">${esc(x.n)}</span></td><td class="muted">${x.b ? esc(x.b) + ' · ' : ''}${esc(x.k)}</td><td class="r">${qtyFmt(x.q)} <span class="muted">${esc(x.u)}</span></td><td class="r">${money(x.t)}</td><td class="r ${x.profit < 0 ? 'red' : ''}">${x.c > 0 ? money(x.profit) : '<span class="amber" title="Alış fiyatı yok">?</span>'}</td><td><div class="hbar" style="grid-template-columns:1fr;padding:0"><div class="b" style="width:${Math.max(0.6, val(x) / mx * 100).toFixed(1)}%"></div></div></td></tr>`).join(''); })()}
         </tbody></table></div>` : `<div class="empty">${ic('chart')}<b>Bu dönemde satış yok</b></div>`}
       </div>
@@ -6076,26 +6085,26 @@ PAGES.raporlar = {
       </div>
       <div class="panel flush mt">
         <div class="panel-head"><h3>${monthly ? 'Aylık' : 'Günlük'} döküm</h3>${fc ? `<span class="sub">${esc(fc)} satışı dahil</span>` : ''}<div class="end"><button class="btn ghost sm" data-a="days">${RS.showDays ? 'Gizle' : 'Göster'}</button></div></div>
-        ${RS.showDays ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>${monthly ? 'Ay' : 'Gün'}</th><th class="r">Satış</th>${fc ? `<th class="r">${esc(fc)}</th>` : ''}<th class="r">Nakit</th><th class="r">Kart</th><th class="r">Veresiye</th><th class="r">Ciro</th><th class="r">Brüt kâr</th></tr></thead><tbody>
-          ${buckets.slice().reverse().map((b) => `<tr><td>${bucketLabel(b, monthly, true)}</td><td class="r">${NF0.format(b.n)}</td>${fc ? `<td class="r">${esc(unitsText(b.fu))}</td>` : ''}<td class="r">${money(b.pay.nakit || 0)}</td><td class="r">${money(b.pay.kart || 0)}</td><td class="r">${money(b.pay.veresiye || 0)}</td><td class="r strong">${money(b.t)}</td><td class="r">${money(b.t - b.c)}</td></tr>`).join('')}
-          </tbody><tfoot><tr><td>Toplam</td><td class="r">${NF0.format(A.n)}</td>${fc ? `<td class="r">${esc(unitsText(focusSummary(A).units))}</td>` : ''}<td class="r">${money(A.pay.nakit)}</td><td class="r">${money(A.pay.kart)}</td><td class="r">${money(A.pay.veresiye)}</td><td class="r">${money(A.t)}</td><td class="r">${money(A.profit)}</td></tr></tfoot></table></div>` : ''}
+        ${RS.showDays ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>${monthly ? 'Ay' : 'Gün'}</th><th class="r">Satış</th>${fc ? `<th class="r">${esc(fc)}</th>` : ''}<th class="r">Nakit</th><th class="r">Kart</th><th class="r">Ciro</th><th class="r">Veresiye</th><th class="r">Brüt kâr</th></tr></thead><tbody>
+          ${buckets.slice().reverse().map((b) => `<tr><td>${bucketLabel(b, monthly, true)}</td><td class="r">${NF0.format(b.n)}</td>${fc ? `<td class="r">${esc(unitsText(b.fu))}</td>` : ''}<td class="r">${money(b.pay.nakit || 0)}</td><td class="r">${money(b.pay.kart || 0)}</td><td class="r strong">${money(ciroOf(b))}</td><td class="r">${money(b.pay.veresiye || 0)}</td><td class="r">${money(b.t - b.c)}</td></tr>`).join('')}
+          </tbody><tfoot><tr><td>Toplam</td><td class="r">${NF0.format(A.n)}</td>${fc ? `<td class="r">${esc(unitsText(focusSummary(A).units))}</td>` : ''}<td class="r">${money(A.pay.nakit)}</td><td class="r">${money(A.pay.kart)}</td><td class="r">${money(A.ciro)}</td><td class="r">${money(A.pay.veresiye)}</td><td class="r">${money(A.profit)}</td></tr></tfoot></table></div>` : ''}
       </div>
     </div>`;
-    mountBreakdown($('#rp-bd', el), A, 'rapor', { title: 'Satış dökümü', sub: 'Kategoriye ya da markaya göre; satıra tıklayınca ürünler açılır' });
+    mountBreakdown($('#rp-bd', el), A, 'rapor', { title: 'Satış dökümü', sub: 'Kategoriye ya da markaya göre, veresiye dahil; satıra tıklayınca ürünler açılır' });
     const lab = (b) => monthly ? MONTHS[+b.id.slice(5, 7) - 1] : (len <= 8 ? fromKey(b.id).toLocaleDateString('tr-TR', { weekday: 'short', day: 'numeric' }) : String(+b.id.slice(8, 10)));
     columnChart($('#rp-ch', el), {
-      height: 250, ariaLabel: 'Ciro ve kâr grafiği',
-      series: [{ name: 'Maliyet', color: 'var(--c-maliyet)' }, { name: 'Brüt kâr', color: 'var(--c-kar)' }],
+      height: 250, ariaLabel: 'Ciro ve veresiye grafiği',
+      series: [{ name: 'Ciro', color: 'var(--c-kar)' }, { name: 'Veresiye', color: 'var(--c-veresiye)' }],
       data: buckets.map((b) => ({
         label: lab(b), hl: b.id === todayKey(),
         title: monthly ? `${MONTHS_L[+b.id.slice(5, 7) - 1]} ${b.id.slice(0, 4)}` : fmtDay(b.id),
-        vals: [Math.max(0, Math.min(b.c, b.t)), Math.max(0, b.t - b.c)],
-        extra: [['Satış', NF0.format(b.n)], ...(fc ? [[fc, unitsText(b.fu)]] : [])]
+        vals: [Math.max(0, ciroOf(b)), Math.max(0, b.pay.veresiye || 0)],
+        extra: [['Satış', NF0.format(b.n)], ['Brüt kâr', money(b.t - b.c)], ...(fc ? [[fc, unitsText(b.fu)]] : [])]
       }))
     });
     columnChart($('#rp-hr', el), {
       height: 200, ariaLabel: 'Saatlere göre satış',
-      series: [{ name: 'Ciro', color: 'var(--c-kar)' }],
+      series: [{ name: 'Satış', color: 'var(--c-kar)' }],
       data: A.h.map((v, i) => ({ label: pad(i), title: `${pad(i)}:00–${pad((i + 1) % 24)}:00`, vals: [v] })).filter((x, i) => i >= 6 || A.h[i] > 0)
     });
     el.addEventListener('click', (e) => {
@@ -6125,27 +6134,27 @@ function exportReportXlsx() {
   const I = (v) => ({ v, s: 'int' });
   const summary = [
     ['Rapor', `${S.settings.bizName || APP.name}`], ['Dönem', rangeLabel(from, to)], ['', ''],
-    ['Ciro', A.t], ['Maliyet', A.c], ['Brüt kâr', A.profit], ['Giderler', A.exp], ['Fire', A.waste], ['Net kâr', A.net], ['', ''],
-    ...(fs ? [[`${fs.cat} satışı`, focusQtyText(fs)], [`${fs.cat} tutarı`, fs.t], [`${fs.cat} cirodaki payı`, { v: A.t > 0 ? r2(fs.t / A.t * 100) / 100 : 0, s: 'pct' }], ['', '']] : []),
-    ['Satış sayısı', I(A.n)], ['Ortalama sepet', A.n ? r2(A.t / A.n) : 0], ['Nakit satış', A.pay.nakit], ['Kartla satış', A.pay.kart], ['Veresiye satış', A.pay.veresiye], ['Veresiye tahsilatı', A.collected], ['', ''],
+    ['Ciro (nakit + kart)', A.ciro], ['Veresiye satış (ciroya dahil değil)', A.pay.veresiye], ['Toplam satış', A.t], ['Maliyet', A.c], ['Brüt kâr (veresiye dahil)', A.profit], ['Giderler', A.exp], ['Fire', A.waste], ['Net kâr', A.net], ['', ''],
+    ...(fs ? [[`${fs.cat} satışı`, focusQtyText(fs)], [`${fs.cat} tutarı`, fs.t], [`${fs.cat} satıştaki payı`, { v: A.t > 0 ? r2(fs.t / A.t * 100) / 100 : 0, s: 'pct' }], ['', '']] : []),
+    ['Satış sayısı', I(A.n)], ['Ortalama sepet', A.n ? r2(A.t / A.n) : 0], ['Nakit satış', A.pay.nakit], ['Kartla satış', A.pay.kart], ['Veresiye tahsilatı', A.collected], ['', ''],
     ['Personel satış sayısı', I(A.st[0])], ['Personel satışları', A.st[1]], ['Personele yapılan indirim', A.st[2]]
   ];
   const fHead = fc ? [single ? `${fc} (${single})` : fc, ...(fc ? [`${fc} tutarı`] : [])] : [];
-  const daily = [[monthly ? 'Ay' : 'Gün', 'Satış sayısı', ...fHead, 'Nakit', 'Kart', 'Veresiye', 'Ciro', 'Maliyet', 'Brüt kâr'],
-    ...buckets.map((b) => [bucketLabel(b, monthly), b.n, ...(fc ? [focusCell(b.fu, single), r2(b.ft || 0)] : []), r2(b.pay.nakit || 0), r2(b.pay.kart || 0), r2(b.pay.veresiye || 0), r2(b.t), r2(b.c), r2(b.t - b.c)])];
+  const daily = [[monthly ? 'Ay' : 'Gün', 'Satış sayısı', ...fHead, 'Nakit', 'Kart', 'Ciro', 'Veresiye', 'Toplam satış', 'Maliyet', 'Brüt kâr'],
+    ...buckets.map((b) => [bucketLabel(b, monthly), b.n, ...(fc ? [focusCell(b.fu, single), r2(b.ft || 0)] : []), r2(b.pay.nakit || 0), r2(b.pay.kart || 0), ciroOf(b), r2(b.pay.veresiye || 0), r2(b.t), r2(b.c), r2(b.t - b.c)])];
   const off = fc ? 2 : 0;
-  const prods = [['Ürün', 'Marka', 'Kategori', 'Birim', 'Miktar', 'Ciro', 'Maliyet', 'Kâr'],
+  const prods = [['Ürün', 'Marka', 'Kategori', 'Birim', 'Miktar', 'Satış tutarı', 'Maliyet', 'Kâr'],
     ...breakdown(A, 'cat').flatMap((g) => g.items).map((x) => [x.n, x.b || '', x.k, x.u, r3(x.q), r2(x.t), r2(x.c), r2(x.t - x.c)])];
   const grp = (by) => {
     const G = breakdown(A, by);
     const tot = sum(G, (g) => g.t);
-    return [[by === 'brand' ? 'Marka' : 'Kategori', 'Miktar', 'Ürün çeşidi', 'Ciro', 'Maliyet', 'Kâr', 'Pay'],
+    return [[by === 'brand' ? 'Marka' : 'Kategori', 'Miktar', 'Ürün çeşidi', 'Satış tutarı', 'Maliyet', 'Kâr', 'Pay'],
       ...G.map((g) => [by === 'brand' ? brandLabel(g.key) : g.key, unitsText(g.units), I(g.items.length), r2(g.t), r2(g.c), r2(g.t - g.c), { v: tot > 0 ? g.t / tot : 0, s: 'pct' }])];
   };
   const exps = [['Tarih', 'Tür', 'Açıklama', 'Ödeme', 'Tutar'], ...S.expenses.filter((x) => { const k = dayKey(x.ts); return k >= from && k <= to; }).map((x) => [fmtDate(x.ts), x.cat, x.note || '', payName[x.method] || x.method, x.amt])];
   const blob = XLSX.build([
-    { name: 'Özet', rows: summary, money: [1], widths: [28, 34], noHeader: true },
-    { name: monthly ? 'Aylık' : 'Günlük', rows: daily, money: [...(fc ? [3] : []), 2 + off, 3 + off, 4 + off, 5 + off, 6 + off, 7 + off], widths: [16, 12, ...(fc ? [16, 14] : []), 13, 13, 13, 14, 14, 14] },
+    { name: 'Özet', rows: summary, money: [1], widths: [36, 34], noHeader: true },
+    { name: monthly ? 'Aylık' : 'Günlük', rows: daily, money: [...(fc ? [3] : []), 2 + off, 3 + off, 4 + off, 5 + off, 6 + off, 7 + off, 8 + off], widths: [16, 12, ...(fc ? [16, 14] : []), 13, 13, 14, 13, 14, 14, 14] },
     { name: 'Kategoriler', rows: grp('cat'), money: [3, 4, 5], widths: [24, 26, 12, 14, 14, 14, 9] },
     { name: 'Markalar', rows: grp('brand'), money: [3, 4, 5], widths: [24, 26, 12, 14, 14, 14, 9] },
     { name: 'Ürünler', rows: prods, money: [5, 6, 7], widths: [36, 18, 22, 9, 10, 14, 14, 14] },
@@ -6162,14 +6171,14 @@ function printReport() {
   printHTML(`<div class="doc">${docHeader('SATIŞ VE KÂR RAPORU', rangeLabel(from, to))}
     ${docFocusBox(A, presetWhen().toLocaleLowerCase('tr'))}
     <div class="doc-grid">
-      <div><h3>Özet</h3><table><tbody>${tr('Ciro', money(A.t))}${tr('Maliyet', money(A.c))}${tr('Brüt kâr', money(A.profit))}${tr('Giderler', money(A.exp))}${tr('Fire', money(A.waste))}</tbody><tfoot><tr><td>Net kâr</td><td class="r">${money(A.net)}</td></tr></tfoot></table></div>
-      <div><h3>Satışlar</h3><table><tbody>${tr('Satış sayısı', NF0.format(A.n))}${tr('Ortalama sepet', money(A.n ? A.t / A.n : 0))}${tr('Nakit', money(A.pay.nakit))}${tr('Kart', money(A.pay.kart))}${tr('Veresiye', money(A.pay.veresiye))}${tr('Veresiye tahsilatı', money(A.collected))}${A.st[0] ? tr(`Personel satışları (${NF0.format(A.st[0])})`, money(A.st[1])) + tr('Personele yapılan indirim', money(A.st[2])) : ''}</tbody></table></div>
+      <div><h3>Özet</h3><table><tbody><tr class="sum"><td>Ciro (nakit + kart)</td><td class="r">${money(A.ciro)}</td></tr>${tr('Veresiye satış (ciroya dahil değil)', money(A.pay.veresiye))}${tr('Toplam satış', money(A.t))}${tr('Maliyet', money(A.c))}${tr('Brüt kâr (veresiye dahil)', money(A.profit))}${tr('Giderler', money(A.exp))}${tr('Fire', money(A.waste))}</tbody><tfoot><tr><td>Net kâr</td><td class="r">${money(A.net)}</td></tr></tfoot></table></div>
+      <div><h3>Satışlar</h3><table><tbody>${tr('Satış sayısı', NF0.format(A.n))}${tr('Ortalama sepet', money(A.n ? A.t / A.n : 0))}${tr('Nakit satış', money(A.pay.nakit))}${tr('Kartla satış', money(A.pay.kart))}${tr('Veresiye tahsilatı', money(A.collected))}${A.st[0] ? tr(`Personel satışları (${NF0.format(A.st[0])})`, money(A.st[1])) + tr('Personele yapılan indirim', money(A.st[2])) : ''}</tbody></table></div>
     </div>
     ${docGroupTable(A, 'cat')}
-    <h3>${monthly ? 'Aylık' : 'Günlük'} döküm</h3><table><thead><tr><th>${monthly ? 'Ay' : 'Gün'}</th><th class="r">Satış</th>${fc ? `<th class="r">${esc(fc)}</th>` : ''}<th class="r">Nakit</th><th class="r">Kart</th><th class="r">Veresiye</th><th class="r">Ciro</th><th class="r">Brüt kâr</th></tr></thead><tbody>
-      ${buckets.filter((b) => b.n || b.t).map((b) => `<tr><td>${bucketLabel(b, monthly)}</td><td class="r">${NF0.format(b.n)}</td>${fc ? `<td class="r">${esc(unitsText(b.fu))}</td>` : ''}<td class="r">${money(b.pay.nakit || 0)}</td><td class="r">${money(b.pay.kart || 0)}</td><td class="r">${money(b.pay.veresiye || 0)}</td><td class="r">${money(b.t)}</td><td class="r">${money(b.t - b.c)}</td></tr>`).join('')}
-    </tbody><tfoot><tr><td>Toplam</td><td class="r">${NF0.format(A.n)}</td>${fc ? `<td class="r">${esc(fs ? unitsText(fs.units) : '')}</td>` : ''}<td class="r">${money(A.pay.nakit)}</td><td class="r">${money(A.pay.kart)}</td><td class="r">${money(A.pay.veresiye)}</td><td class="r">${money(A.t)}</td><td class="r">${money(A.profit)}</td></tr></tfoot></table>
-    ${top.length ? `<h3>En çok satan ürünler</h3><table><thead><tr><th>Ürün</th><th>Marka</th><th>Kategori</th><th class="r">Miktar</th><th class="r">Ciro</th><th class="r">Kâr</th></tr></thead><tbody>${top.map((x) => `<tr><td>${esc(x.n)}</td><td>${esc(x.b || '')}</td><td>${esc(x.k)}</td><td class="r">${qtyFmt(x.q)} ${esc(x.u)}</td><td class="r">${money(x.t)}</td><td class="r">${money(x.t - x.c)}</td></tr>`).join('')}</tbody></table>` : ''}
+    <h3>${monthly ? 'Aylık' : 'Günlük'} döküm</h3><table><thead><tr><th>${monthly ? 'Ay' : 'Gün'}</th><th class="r">Satış</th>${fc ? `<th class="r">${esc(fc)}</th>` : ''}<th class="r">Nakit</th><th class="r">Kart</th><th class="r">Ciro</th><th class="r">Veresiye</th><th class="r">Brüt kâr</th></tr></thead><tbody>
+      ${buckets.filter((b) => b.n || b.t).map((b) => `<tr><td>${bucketLabel(b, monthly)}</td><td class="r">${NF0.format(b.n)}</td>${fc ? `<td class="r">${esc(unitsText(b.fu))}</td>` : ''}<td class="r">${money(b.pay.nakit || 0)}</td><td class="r">${money(b.pay.kart || 0)}</td><td class="r">${money(ciroOf(b))}</td><td class="r">${money(b.pay.veresiye || 0)}</td><td class="r">${money(b.t - b.c)}</td></tr>`).join('')}
+    </tbody><tfoot><tr><td>Toplam</td><td class="r">${NF0.format(A.n)}</td>${fc ? `<td class="r">${esc(fs ? unitsText(fs.units) : '')}</td>` : ''}<td class="r">${money(A.pay.nakit)}</td><td class="r">${money(A.pay.kart)}</td><td class="r">${money(A.ciro)}</td><td class="r">${money(A.pay.veresiye)}</td><td class="r">${money(A.profit)}</td></tr></tfoot></table>
+    ${top.length ? `<h3>En çok satan ürünler</h3><table><thead><tr><th>Ürün</th><th>Marka</th><th>Kategori</th><th class="r">Miktar</th><th class="r">Tutar</th><th class="r">Kâr</th></tr></thead><tbody>${top.map((x) => `<tr><td>${esc(x.n)}</td><td>${esc(x.b || '')}</td><td>${esc(x.k)}</td><td class="r">${qtyFmt(x.q)} ${esc(x.u)}</td><td class="r">${money(x.t)}</td><td class="r">${money(x.t - x.c)}</td></tr>`).join('')}</tbody></table>` : ''}
   </div>`);
 }
 
@@ -6184,15 +6193,16 @@ function greeting() {
   if (h >= 18 && h < 23) return 'İyi akşamlar';
   return 'İyi geceler';
 }
+/* Dün aynı saate kadarki ciro (nakit + kart; veresiye hariç) */
 function sameTimeYesterday() {
-  const y = S.days.get(addDays(todayKey(), -1));
+  const yk = addDays(todayKey(), -1);
+  const y = S.days.get(yk);
   if (!y) return null;
-  const now = new Date();
-  const H = now.getHours();
+  const lim = new Date(); lim.setDate(lim.getDate() - 1);
+  const limTs = lim.getTime();
   let v = 0;
-  for (let i = 0; i < H; i++) v += y.h[i] || 0;
-  v += (y.h[H] || 0) * (now.getMinutes() / 60);
-  return { part: r2(v), full: y.t };
+  for (const s of S.sales) if (!s.void && s.day === yk && s.ts <= limTs) v += s.total - saleCredit(s);
+  return { part: r2(v), full: ciroOf(y) };
 }
 
 function onboardSteps() {
@@ -6235,8 +6245,8 @@ PAGES.ozet = {
     const profit = r2(d.t - d.c);
     let cmp = '';
     if (y && y.full > 0) {
-      const ch = y.part > 0 ? (d.t - y.part) / y.part : null;
-      cmp = `Dün bu saate kadar ${money(y.part)} satılmıştı${ch !== null && Math.abs(ch) >= 0.005 ? `, bugün <b class="${ch >= 0 ? 'green' : 'red'}">${ch >= 0 ? '%' + NF0.format(ch * 100) + ' daha fazla' : '%' + NF0.format(-ch * 100) + ' daha az'}</b>` : ''}.`;
+      const ch = y.part > 0 ? (ciroOf(d) - y.part) / y.part : null;
+      cmp = `Dün bu saate kadar ${money(y.part)} ciro yapılmıştı${ch !== null && Math.abs(ch) >= 0.005 ? `, bugün <b class="${ch >= 0 ? 'green' : 'red'}">${ch >= 0 ? '%' + NF0.format(ch * 100) + ' daha fazla' : '%' + NF0.format(-ch * 100) + ' daha az'}</b>` : ''}.`;
     }
     const stockA = stockAlerts();
     const sktA = sktAlerts();
@@ -6259,7 +6269,7 @@ PAGES.ozet = {
     }
     if (overL.length) alerts.push({ cls: 'bad', icon: 'book', t: `${plural(overL.length, 'müşteri')} borç limitini aştı`, d: overL.slice(0, 4).map((c) => `${c.name} (${money(c.bal)})`).join(', '), btn: ['Göster', 'over'] });
     if (overD.length) alerts.push({ cls: 'warn', icon: 'vade', t: `${plural(overD.length, 'müşterinin')} vadesi geçmiş borcu var`, d: `${S.settings.vadeDays || 30} günü geçen borç toplamı ${money(sum(overD, (c) => c.overdue))}. ${overD.slice(0, 3).map((c) => c.name).join(', ')}${overD.length > 3 ? '…' : ''}`, btn: ['Göster', 'late'] });
-    if (yDay && yDay.n > 0 && !(yClosed && yClosed.closedAt)) alerts.push({ cls: 'info', icon: 'cash', t: 'Dünün gün sonu alınmadı', d: `Dün ${plural(yDay.n, 'satış')}, ${money(yDay.t)} ciro yapıldı. Kasayı sayıp kapatmak eksik ya da fazlayı gösterir.`, btn: ['Gün sonu al', 'close'] });
+    if (yDay && yDay.n > 0 && !(yClosed && yClosed.closedAt)) alerts.push({ cls: 'info', icon: 'cash', t: 'Dünün gün sonu alınmadı', d: `Dün ${plural(yDay.n, 'satış')}, ${money(ciroOf(yDay))} ciro yapıldı. Kasayı sayıp kapatmak eksik ya da fazlayı gösterir.`, btn: ['Gün sonu al', 'close'] });
     if (DB.ok && !s.demo) {
       if (bst.level === 'perm') alerts.push({ cls: 'warn', icon: 'drive', t: 'Otomatik yedekleme izin bekliyor', d: `Yedek klasörüne yazmak için izni yenileyin. Son yedek: ${bst.last ? agoText(bst.last) : 'hiç alınmadı'}.`, btn: ['İzni yenile', 'perm'] });
       else if (bst.manual && bst.level !== 'ok') alerts.push({ cls: bst.level === 'bad' ? 'bad' : 'warn', icon: 'drive', t: bst.last ? `Son yedek ${agoText(bst.last)} alındı` : 'Henüz yedek alınmadı', d: 'Bilgisayar arızalanırsa kayıtlar kaybolmasın diye otomatik yedeklemeyi açın.', btn: ['Yedeklemeyi aç', 'backup'] });
@@ -6276,12 +6286,12 @@ PAGES.ozet = {
       ${onboardHtml()}
       <div class="panel">
         <div class="hero-row">
-          <div><div class="hero-k">Bugünkü ciro</div><div class="hero-v">${money(d.t)}</div>
-            <div class="hero-d">${d.n ? `${plural(d.n, 'satış')}, brüt kâr <b>${money(profit)}</b>. ` : 'Henüz satış yapılmadı. '}${cmp}</div></div>
+          <div><div class="hero-k">Bugünkü ciro <span style="font-weight:500">(nakit + kart)</span></div><div class="hero-v">${money(ciroOf(d))}</div>
+            <div class="hero-d">${d.n ? `${plural(d.n, 'satış')}, brüt kâr <b>${money(profit)}</b> (veresiye dahil). ` : 'Henüz satış yapılmadı. '}${cmp}</div></div>
           <div class="hero-side c3">
             <div><div class="k">Nakit</div><div class="v">${money(d.pay.nakit || 0)}</div></div>
             <div><div class="k">Kart</div><div class="v">${money(d.pay.kart || 0)}</div></div>
-            <div><div class="k">Veresiye</div><div class="v">${money(d.pay.veresiye || 0)}</div></div>
+            <div><div class="k">Veresiye</div><div class="v">${money(d.pay.veresiye || 0)}</div><div class="s">ciroya dahil değil</div></div>
             ${f ? `<button class="hs-focus" data-go="kasa" title="Günün satış dökümünü aç"><div class="k">${ic('target', 'sm')}${esc(f.cat)}</div><div class="v">${esc(focusQtyText(f))}</div><div class="s">${money(f.t)}</div></button>` : ''}
             ${showStaff ? `<div><div class="k">Personel</div><div class="v">${money(stf[1])}</div><div class="s">${plural(stf[0], 'satış')}</div></div>` : ''}
             <div><div class="k">Kasada olmalı</div><div class="v">${money(cs.expected)}</div></div>
@@ -6317,7 +6327,7 @@ PAGES.ozet = {
     for (let i = 13; i >= 0; i--) {
       const k = addDays(tk, -i);
       const x = S.days.get(k);
-      days.push({ label: i === 0 ? 'Bugün' : fromKey(k).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' }), title: fmtDay(k), hl: i === 0, vals: [x ? x.t : 0], extra: [['Satış', NF0.format(x ? x.n : 0)], ['Brüt kâr', money(x ? x.t - x.c : 0)]] });
+      days.push({ label: i === 0 ? 'Bugün' : fromKey(k).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' }), title: fmtDay(k), hl: i === 0, vals: [ciroOf(x)], extra: [['Satış', NF0.format(x ? x.n : 0)], ['Veresiye', money(x ? x.pay.veresiye || 0 : 0)], ['Brüt kâr', money(x ? x.t - x.c : 0)]] });
     }
     columnChart($('#db-ch', el), { height: 190, series: [{ name: 'Ciro', color: 'var(--c-kar)' }], data: days, ariaLabel: 'Son 14 günün cirosu', emptyText: 'Satış yaptıkça son 14 günün cirosu burada görünür.' });
     el.addEventListener('click', async (e) => {
@@ -6732,6 +6742,7 @@ function setAbout(body) {
       <li><b>Marka.</b> Ürünlere marka yazılır; satış ekranında marka, sonra o markanın kategorileri seçilir.</li>
       <li><b>Ünvan ve personel işareti.</b> Veresiye müşterileri ünvanla da aranır.</li>
       <li><b>Vade farkı.</b> Vadesi geçen borçlara aylık oranla, sizin onayınızla eklenir.</li>
+      <li><b>Ciro ve veresiye ayrı.</b> Ciro yalnızca nakit ve kart satışlarıdır; veresiye satış ayrı gösterilir, ciroya katılmaz.</li>
     </ul></div>
     <div class="set-sec"><h3>Klavye kısayolları</h3><p class="desc">Satış ekranında barkod okuyucuyla birlikte en hızlı kullanım.</p><div class="kbd-list">${keys.map(([k, d]) => `<kbd>${esc(k)}</kbd><span>${esc(d)}</span>`).join('')}</div></div>
     <div class="set-sec"><h3>Barkod okuyucu</h3><p class="desc" style="margin-bottom:0">USB barkod okuyucular klavye gibi çalışır, ek kurulum gerekmez. Okuyucuyu takın, satış ekranındayken ürünü okutun. Okunan barkod kayıtlı değilse ürün kartı açılır; adını ve fiyatını yazıp kaydedince ürün satışa eklenir.</p></div>`;
